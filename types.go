@@ -8,12 +8,13 @@ const (
 	roleServer             = "server"
 	roleNode               = "node"
 	pingInterval           = 5 * time.Second
+	nodeHealthTime         = 10 * time.Second
 )
 
 type NodeInfo struct {
-	Id           string `json:"id,omitempty"`
-	Role         string `json:"role,omitempty"`
-	RegisterTime int64  `json:"registerTime,omitempty"`
+	Id        string `json:"id,omitempty"`
+	Role      string `json:"role,omitempty"`
+	HeartTime int64  `json:"HeartTime,omitempty"`
 }
 
 type pingPongInfo struct {

@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/pkg/errors v0.9.1
-	github.com/u2go/u2utils v0.12.0
+	github.com/u2go/u2utils v0.12.1
 	go.uber.org/zap v1.21.0
 )
 

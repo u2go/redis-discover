@@ -28,16 +28,20 @@ func New(redisClient *redis.Client, logger *zap.Logger, serviceName string) (*Re
 	}
 
 	return &RedisDiscover{
-		redis:       redisClient,
-		logger:      logger,
-		serviceName: serviceName,
-		nodeId:      genNodeId(serviceName),
+		redis:          redisClient,
+		logger:         logger,
+		serviceName:    serviceName,
+		nodeId:         genNodeId(serviceName),
+		nodes:          map[string]*NodeInfo{},
+		messageHandler: map[string][]func(info *MessageInfo) error{},
 	}, nil
 }
 
 // StartServer 启动主服务。
 // 接受新节点，并维护节点状态
 func (rd *RedisDiscover) StartServer() error {
+	rd.logger.Debug("StartServer")
+
 	rd.role = roleServer
 
 	// msg listen
@@ -74,9 +78,11 @@ func (rd *RedisDiscover) StartServer() error {
 		}
 
 		// not pong node not in list
-		if _, ok := rd.nodes[info.NodeId]; !ok {
+		node, ok := rd.nodes[info.NodeId]
+		if !ok {
 			return errors.Errorf("node not in nodes list when ping (nodeId: %s)", info.NodeId)
 		}
+		node.HeartTime = time.Now().UnixNano()
 
 		return rd.pong(message.TargetNodeId, info)
 	})
@@ -156,24 +162,34 @@ func (rd *RedisDiscover) OnMessage(event string, handler func(message *MessageIn
 
 // Add 添加节点
 func (rd *RedisDiscover) Add(info *NodeInfo) {
-	info.RegisterTime = time.Now().UnixNano()
+	info.HeartTime = time.Now().UnixNano()
 	rd.nodes[info.Id] = info
+
+	rd.logger.Info("add node", zap.Any("info", info), zap.Any("nodes", rd.nodes))
 }
 
 // Remove 添加节点
 func (rd *RedisDiscover) Remove(nodeId string) {
 	delete(rd.nodes, nodeId)
+
+	rd.logger.Info("remove node", zap.Any("id", nodeId), zap.Any("nodes", rd.nodes))
 }
 
 func (rd *RedisDiscover) removeNoPingNode() {
 	for {
 		time.Sleep(1 * time.Second)
 
+		//var nodes []string
 		for id, v := range rd.nodes {
-			if v.RegisterTime <= time.Now().UnixNano()-int64(10*time.Second) {
+			if v.HeartTime <= time.Now().UnixNano()-int64(nodeHealthTime) {
 				rd.Remove(id)
+				continue
 			}
+			//nodes = append(nodes, id)
 		}
+
+		//rd.logger.Debug("nodes", zap.Any("nodes", nodes))
+
 	}
 }
 
@@ -182,7 +198,9 @@ func (rd *RedisDiscover) pingLoop() {
 		time.Sleep(pingInterval)
 
 		err := rd.ping()
-		rd.logger.Error("ping error", zap.Error(err))
+		if err != nil {
+			rd.logger.Error("ping error", zap.Error(err))
+		}
 
 		// todo ping error process
 	}
@@ -204,6 +222,11 @@ func (rd *RedisDiscover) pong(nodeId string, info *pingPongInfo) error {
 
 // 添加节点
 func (rd *RedisDiscover) send(targetNodeId string, event string, payload any) error {
+	rd.logger.Debug("send",
+		zap.Any("targetNodeId", targetNodeId),
+		zap.Any("event", event),
+		zap.Any("payload", payload),
+	)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -245,6 +268,11 @@ func (rd *RedisDiscover) subMessage() {
 			if handlers, ok := rd.messageHandler[info.Event]; ok {
 				for _, handler := range handlers {
 					err := handler(&info)
+					rd.logger.Debug("handler msg",
+						zap.Any("who", rd.role),
+						zap.Any("id", rd.nodeId),
+						zap.Any("handler", fmt.Sprintf("%+v", handler)),
+						zap.Any("msg", msg), zap.Error(err))
 					if err != nil {
 						rd.logger.Error("message handler error", zap.Error(err))
 					}
